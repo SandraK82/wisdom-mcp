@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signRelation } from '../crypto/signing.js';
 import type { CreateRelationRequest, RelationType } from '../gateway/types.js';
-import { FragmentTypes } from '../gateway/types.js';
+import { createLocalAddress, addressToString } from '../gateway/types.js';
 
 export function createRelationTools(): ToolDefinition[] {
   return [
@@ -24,20 +24,23 @@ export function createRelationTools(): ToolDefinition[] {
             relation_type: {
               type: 'string',
               enum: [
-                'REFERENCES',
+                'TRUST',
                 'SUPPORTS',
                 'CONTRADICTS',
-                'DERIVED_FROM',
-                'PART_OF',
+                'EXTENDS',
                 'SUPERSEDES',
-                'RELATES_TO',
-                'TYPED_AS',
+                'DERIVED_FROM',
+                'RELATED_TO',
+                'EXAMPLE_OF',
+                'SPECIALIZES',
+                'CLARIFIES',
+                'GENERALIZES',
               ],
               description: 'Type of relation',
             },
-            metadata: {
-              type: 'object',
-              description: 'Additional metadata for the relation',
+            content: {
+              type: 'string',
+              description: 'Optional reasoning or explanation',
             },
           },
           required: ['source', 'target', 'relation_type'],
@@ -52,13 +55,20 @@ export function createRelationTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
+        const creatorAddr = createLocalAddress('AGENT', agentUuid);
+        const fromAddr = createLocalAddress('FRAGMENT', args.source as string);
+        const toAddr = createLocalAddress('FRAGMENT', args.target as string);
+        const now = new Date().toISOString();
+
         const relationData: Omit<CreateRelationRequest, 'signature'> = {
           uuid,
-          source: args.source as string,
-          target: args.target as string,
-          relation_type: args.relation_type as RelationType,
-          metadata: (args.metadata as Record<string, unknown>) || {},
-          author: agentUuid,
+          from: fromAddr,
+          to: toAddr,
+          by: creatorAddr,
+          type: args.relation_type as RelationType,
+          content: (args.content as string) || '',
+          creator: creatorAddr,
+          when: now,
         };
 
         const signature = await signRelation(relationData, privateKey);
@@ -69,10 +79,10 @@ export function createRelationTools(): ToolDefinition[] {
 
         return {
           uuid: relation.uuid,
-          source: relation.source,
-          target: relation.target,
-          relation_type: relation.relation_type,
-          metadata: relation.metadata,
+          from: addressToString(relation.from),
+          to: addressToString(relation.to),
+          type: relation.type,
+          content: relation.content,
           created_at: relation.created_at,
         };
       },
@@ -99,19 +109,21 @@ export function createRelationTools(): ToolDefinition[] {
         },
       },
       handler: async (args, context) => {
-        const relations = await context.gateway.getRelationsForEntity(
+        const relationsResult = await context.gateway.getRelationsForEntity(
           args.entity as string,
           args.direction as 'source' | 'target' | 'both' | undefined
         );
+        const relations = relationsResult || [];
 
         return {
           relations: relations.map((r) => ({
             uuid: r.uuid,
-            source: r.source,
-            target: r.target,
-            relation_type: r.relation_type,
-            metadata: r.metadata,
-            author: r.author,
+            from: addressToString(r.from),
+            to: addressToString(r.to),
+            type: r.type,
+            content: r.content,
+            by: addressToString(r.by),
+            confidence: r.confidence,
           })),
           count: relations.length,
         };
@@ -122,7 +134,7 @@ export function createRelationTools(): ToolDefinition[] {
       tool: {
         name: 'wisdom_type_fragment',
         description:
-          'Assign a semantic type to a fragment (QUESTION, ANSWER, FACT, etc.) via TYPED_AS relation',
+          'Assign a semantic type to a fragment (QUESTION, ANSWER, FACT, etc.) via TYPE tag',
         inputSchema: {
           type: 'object',
           properties: {
@@ -141,6 +153,9 @@ export function createRelationTools(): ToolDefinition[] {
                 'EXAMPLE',
                 'PROCEDURE',
                 'INSIGHT',
+                'HYPOTHESIS',
+                'ANTITHESIS',
+                'SYNTHESIS',
               ],
               description: 'Semantic type to assign',
             },
@@ -156,22 +171,38 @@ export function createRelationTools(): ToolDefinition[] {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
-        // Map type name to type tag value
-        const typeKey = args.fragment_type as keyof typeof FragmentTypes;
-        const typeValue = FragmentTypes[typeKey];
+        // Convert type name to lowercase tag name (e.g., "FACT" -> "fact")
+        const typeName = (args.fragment_type as string).toLowerCase();
 
-        if (!typeValue) {
-          throw new Error(`Unknown fragment type: ${args.fragment_type}`);
+        // Look up the TYPE tag by name
+        const typeTag = await context.gateway.getTagByName(typeName);
+        if (!typeTag) {
+          throw new Error(
+            `Type tag '${typeName}' not found. Create it first with: wisdom_create_tag --name ${typeName} --category TYPE`
+          );
+        }
+        if (typeTag.category !== 'TYPE') {
+          throw new Error(
+            `Tag '${typeName}' exists but is not a TYPE tag (category: ${typeTag.category})`
+          );
         }
 
         const uuid = uuidv4();
+        const creatorAddr = createLocalAddress('AGENT', agentUuid);
+        const fragmentAddr = createLocalAddress('FRAGMENT', args.fragment as string);
+        const tagAddr = createLocalAddress('TAG', typeTag.uuid);
+        const now = new Date().toISOString();
+
+        // Create RELATED_TO relation from fragment to TYPE tag
         const relationData: Omit<CreateRelationRequest, 'signature'> = {
           uuid,
-          source: args.fragment as string,
-          target: typeValue, // e.g., "type:question"
-          relation_type: 'TYPED_AS',
-          metadata: { type_name: args.fragment_type },
-          author: agentUuid,
+          from: fragmentAddr,
+          to: tagAddr,
+          by: creatorAddr,
+          type: 'RELATED_TO',
+          content: `Fragment typed as ${args.fragment_type}`,
+          creator: creatorAddr,
+          when: now,
         };
 
         const signature = await signRelation(relationData, privateKey);
@@ -182,10 +213,11 @@ export function createRelationTools(): ToolDefinition[] {
 
         return {
           uuid: relation.uuid,
-          fragment: relation.source,
+          fragment: addressToString(relation.from),
           fragment_type: args.fragment_type,
-          type_tag: typeValue,
-          message: `Fragment typed as ${args.fragment_type}`,
+          type_tag: typeName,
+          type_tag_uuid: typeTag.uuid,
+          message: `Fragment typed as ${args.fragment_type} via RELATED_TO relation to TYPE tag`,
         };
       },
     },
@@ -217,15 +249,21 @@ export function createRelationTools(): ToolDefinition[] {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
-        // Create SUPPORTS relation from answer to question
         const uuid = uuidv4();
+        const creatorAddr = createLocalAddress('AGENT', agentUuid);
+        const answerAddr = createLocalAddress('FRAGMENT', args.answer as string);
+        const questionAddr = createLocalAddress('FRAGMENT', args.question as string);
+        const now = new Date().toISOString();
+
         const relationData: Omit<CreateRelationRequest, 'signature'> = {
           uuid,
-          source: args.answer as string,
-          target: args.question as string,
-          relation_type: 'SUPPORTS',
-          metadata: { link_type: 'answer_to_question' },
-          author: agentUuid,
+          from: answerAddr,
+          to: questionAddr,
+          by: creatorAddr,
+          type: 'SUPPORTS',
+          content: 'Answer to question',
+          creator: creatorAddr,
+          when: now,
         };
 
         const signature = await signRelation(relationData, privateKey);
