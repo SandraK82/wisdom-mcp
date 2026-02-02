@@ -1,0 +1,8 @@
+{
+  "agent_uuid": "YOUR_AGENT_UUID_HERE",
+  "private_key": "YOUR_BASE64_PRIVATE_KEY_HERE",
+  "gateway_url": "http://localhost:8080",
+  "current_project": null,
+  "default_tags": [],
+  "default_transform": null
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "wisdom": {
+      "command": "node",
+      "args": ["/absolute/path/to/wisdom-mcp/dist/index.js"],
+      "env": {
+        "WISDOM_GATEWAY_URL": "http://localhost:8080"
+      }
+    }
+  }
+}
