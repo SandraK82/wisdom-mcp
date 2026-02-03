@@ -157,7 +157,8 @@ export function loadConfig(startDir?: string): LoadedConfig {
 }
 
 /**
- * Save config to a file
+ * Save config to a file using atomic write (write to temp + rename)
+ * to prevent race conditions when multiple sub-agents write concurrently.
  */
 export function saveConfig(
   config: PartialWisdomConfig,
@@ -172,7 +173,16 @@ export function saveConfig(
   const existing = loadConfigFile(filePath) || {};
   const merged = { ...existing, ...config };
 
-  fs.writeFileSync(filePath, JSON.stringify(merged, null, 2));
+  // Atomic write: write to temp file, then rename
+  const tmpPath = filePath + '.tmp.' + process.pid + '.' + Date.now();
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(merged, null, 2));
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    // Clean up temp file on failure
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
 /**

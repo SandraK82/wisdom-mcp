@@ -136,7 +136,7 @@ export function createRelationTools(): ToolDefinition[] {
       tool: {
         name: 'wisdom_type_fragment',
         description:
-          'Assign a semantic type to a fragment (QUESTION, ANSWER, FACT, etc.) via TYPE tag',
+          'Call this immediately after creating a fragment to classify it. Assigns a semantic type (QUESTION, ANSWER, FACT, INSIGHT, PROCEDURE, etc.) via TYPE tag relation.',
         inputSchema: {
           type: 'object',
           properties: {

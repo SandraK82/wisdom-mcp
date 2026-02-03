@@ -14,7 +14,7 @@ export function createUtilityTools(): ToolDefinition[] {
       tool: {
         name: 'wisdom_whoami',
         description:
-          'Show current agent identity, project context, and gateway configuration',
+          'Call this at the start of each session to verify agent identity and gateway connectivity. Shows current agent identity, project context, and gateway configuration.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -241,6 +241,119 @@ export function createUtilityTools(): ToolDefinition[] {
           agent_uuid: context.config.config.agent_uuid,
           current_project: context.config.config.current_project,
         };
+      },
+    },
+
+    {
+      tool: {
+        name: 'wisdom_quickstart',
+        description:
+          'One-step setup: checks agent, registers if needed, verifies project, and loads context for current task. Call this instead of multiple separate setup calls.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            task_description: {
+              type: 'string',
+              description: 'Description of the current task to load relevant context for',
+            },
+            agent_description: {
+              type: 'string',
+              description: 'Description for the agent if auto-registration is needed',
+            },
+          },
+          required: [],
+        },
+      },
+      handler: async (args, context) => {
+        const steps: string[] = [];
+        const result: Record<string, unknown> = {};
+
+        // Step 1: Check agent
+        const { config } = context.config;
+        if (!config.private_key || !config.agent_uuid) {
+          // Auto-register
+          steps.push('Agent not configured — auto-registering...');
+          const keypair = await generateKeyPair();
+          const uuid = uuidv4();
+          const description = (args.agent_description as string) || 'AI Agent (auto-registered)';
+          const agentData = {
+            uuid,
+            public_key: keypair.publicKeyBase64,
+            description,
+            trust: { num_trusts: 0, trusts: [] },
+            primary_hub: '',
+          };
+
+          try {
+            const signature = await signAgent(agentData, keypair.privateKey);
+            const agent = await context.gateway.createAgent({ ...agentData, signature });
+
+            const configUpdate = {
+              private_key: keypair.privateKeyBase64,
+              agent_uuid: agent.uuid,
+            };
+
+            const preferredPath = getPreferredConfigPath(context.config.paths);
+            if (preferredPath === context.config.paths.projectConfig) {
+              saveProjectConfig(configUpdate, context.config.paths.projectRoot || undefined);
+            } else {
+              saveGlobalConfig(configUpdate);
+            }
+            context.updateConfig(configUpdate);
+
+            result.agent_uuid = agent.uuid;
+            result.auto_registered = true;
+            steps.push(`Agent registered: ${agent.uuid}`);
+          } catch (error) {
+            steps.push(`Auto-registration failed: ${error instanceof Error ? error.message : String(error)}`);
+            result.auto_registered = false;
+          }
+        } else {
+          result.agent_uuid = config.agent_uuid;
+          result.auto_registered = false;
+          steps.push(`Agent already configured: ${config.agent_uuid}`);
+        }
+
+        // Step 2: Check gateway
+        const isReachable = await context.gateway.isReachable();
+        result.gateway_reachable = isReachable;
+        steps.push(isReachable ? 'Gateway reachable' : 'WARNING: Gateway not reachable');
+
+        // Step 3: Check project
+        result.current_project = context.config.config.current_project || null;
+        if (result.current_project) {
+          steps.push(`Project set: ${result.current_project}`);
+        } else {
+          steps.push('No project set (use wisdom_create_project or wisdom_set_project)');
+        }
+
+        // Step 4: Load context if task description provided
+        if (args.task_description && isReachable) {
+          try {
+            const searchResult = await context.gateway.searchFragments({
+              query: args.task_description as string,
+              project: context.config.config.current_project || undefined,
+              limit: 10,
+            });
+            const items = searchResult.items || [];
+            result.relevant_fragments = items.length;
+            if (items.length > 0) {
+              result.context = items.map((f) => ({
+                uuid: f.uuid,
+                content: f.content.substring(0, 200) + (f.content.length > 200 ? '...' : ''),
+                trust_score: f.trust_summary?.score ?? 0,
+              }));
+              steps.push(`Loaded ${items.length} relevant fragments`);
+            } else {
+              steps.push('No prior knowledge found for this task');
+            }
+          } catch {
+            steps.push('Could not load context (search failed)');
+          }
+        }
+
+        result.steps = steps;
+        return result;
       },
     },
   ];

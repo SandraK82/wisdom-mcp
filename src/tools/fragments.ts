@@ -17,7 +17,7 @@ export function createFragmentTools(): ToolDefinition[] {
     {
       tool: {
         name: 'wisdom_create_fragment',
-        description: 'Create and sign a new knowledge fragment',
+        description: 'Call this after solving a problem, discovering an insight, or making a decision to persist the knowledge for future sessions. Creates a cryptographically signed knowledge fragment in the wisdom network.',
         inputSchema: {
           type: 'object',
           properties: {

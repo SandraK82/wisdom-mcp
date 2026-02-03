@@ -302,7 +302,7 @@ export function createValidityTools(): ToolDefinition[] {
       tool: {
         name: 'wisdom_load_context_for_task',
         description:
-          'Load the most relevant fragments for a task, filtered by trust and confidence within a token budget',
+          'ALWAYS call this at the start of any task to load relevant prior knowledge and avoid duplicating work. Searches the wisdom network for fragments matching the task description, filtered by trust and confidence within a token budget.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -364,21 +364,51 @@ export function createValidityTools(): ToolDefinition[] {
           selectedFragments.push(fragment);
         }
 
-        return {
-          task: taskDescription,
-          token_budget: tokenBudget,
-          estimated_tokens: Math.ceil(totalChars / charsPerToken),
-          fragments_found: searchData.length,
-          fragments_returned: selectedFragments.length,
-          fragments: selectedFragments.map((f) => ({
-            uuid: f.uuid,
-            content: f.content,
-            confidence: f.confidence,
-            evidence_type: f.evidence_type,
-            trust_score: f.trust_summary?.score ?? 0,
-            relevance_score: Math.round(f.relevance_score * 100) / 100,
-          })),
-        };
+        // Build formatted output for easy consumption
+        const estimatedTokens = Math.ceil(totalChars / charsPerToken);
+        const avgTrust = selectedFragments.length > 0
+          ? selectedFragments.reduce((sum, f) => sum + (f.trust_summary?.score ?? 0), 0) / selectedFragments.length
+          : 0;
+
+        const highRelevance = selectedFragments.filter((f) => f.relevance_score > 0.6);
+        const medRelevance = selectedFragments.filter((f) => f.relevance_score > 0.3 && f.relevance_score <= 0.6);
+        const lowRelevance = selectedFragments.filter((f) => f.relevance_score <= 0.3);
+
+        function formatFragment(f: typeof selectedFragments[0]): string {
+          const typeLabel = f.evidence_type && f.evidence_type !== 'unknown' ? `[${f.evidence_type.toUpperCase()}]` : '';
+          const trustLabel = `Trust: ${((f.trust_summary?.score ?? 0) + 1) / 2 >= 0.5 ? Math.round(((f.trust_summary?.score ?? 0) + 1) / 2 * 100) / 100 : 'low'}`;
+          return `- ${typeLabel} "${f.content}" (${trustLabel}, id:${f.uuid.substring(0, 8)})`;
+        }
+
+        const sections: string[] = [];
+        sections.push(`## Relevant Knowledge (${selectedFragments.length} fragments, Trust: ${Math.round(((avgTrust + 1) / 2) * 100) / 100} avg)`);
+        sections.push('');
+
+        if (highRelevance.length > 0) {
+          sections.push('### High relevance:');
+          highRelevance.forEach((f) => sections.push(formatFragment(f)));
+          sections.push('');
+        }
+
+        if (medRelevance.length > 0) {
+          sections.push('### Medium relevance:');
+          medRelevance.forEach((f) => sections.push(formatFragment(f)));
+          sections.push('');
+        }
+
+        if (lowRelevance.length > 0) {
+          sections.push('### Low relevance:');
+          lowRelevance.forEach((f) => sections.push(formatFragment(f)));
+          sections.push('');
+        }
+
+        if (selectedFragments.length === 0) {
+          sections.push('No relevant prior knowledge found for this task.');
+        }
+
+        sections.push(`\n---\nTokens: ~${estimatedTokens}/${tokenBudget} | Found: ${searchData.length} | Returned: ${selectedFragments.length}`);
+
+        return sections.join('\n');
       },
     },
   ];

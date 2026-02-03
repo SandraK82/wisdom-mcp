@@ -3,6 +3,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { loadConfig, LoadedConfig } from './config/index.js';
@@ -163,6 +165,7 @@ export async function createServer(): Promise<Server> {
     {
       capabilities: {
         tools: {},
+        prompts: {},
       },
     }
   );
@@ -184,6 +187,45 @@ export async function createServer(): Promise<Server> {
   for (const def of toolDefinitions) {
     toolMap.set(def.tool.name, def);
   }
+
+  // Track tool calls for post-task hints
+  let toolCallCount = 0;
+  const HINT_INTERVAL = 5;
+
+  // Register prompts
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [
+      {
+        name: 'wisdom-context',
+        description: 'Load relevant knowledge for current task from the wisdom network',
+        arguments: [
+          {
+            name: 'task',
+            description: 'Current task description',
+            required: true,
+          },
+        ],
+      },
+    ],
+  }));
+
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    if (request.params.name === 'wisdom-context') {
+      return {
+        description: 'Load relevant knowledge for current task',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `Please call wisdom_load_context_for_task with task_description: "${request.params.arguments?.task || 'general task'}" to load relevant prior knowledge before proceeding.`,
+            },
+          },
+        ],
+      };
+    }
+    throw new Error(`Unknown prompt: ${request.params.name}`);
+  });
 
   // Handle list tools request
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -211,6 +253,7 @@ export async function createServer(): Promise<Server> {
 
     try {
       const result = await definition.handler(args || {}, context);
+      toolCallCount++;
 
       // Check for hub status warnings and include them in the response
       const hubWarnings = context.gateway.getHubWarningMessages();
@@ -231,6 +274,15 @@ export async function createServer(): Promise<Server> {
         content.push({
           type: 'text',
           text: '\n---\n' + hubWarnings.join('\n'),
+        });
+      }
+
+      // Add post-task hint periodically (not for wisdom_create_fragment itself)
+      const wisdomWriteTools = ['wisdom_create_fragment', 'wisdom_store_transformed_fragments', 'wisdom_load_context_for_task', 'wisdom_whoami'];
+      if (toolCallCount % HINT_INTERVAL === 0 && !wisdomWriteTools.includes(name)) {
+        content.push({
+          type: 'text',
+          text: '\nHint: If you discovered something worth remembering, use wisdom_create_fragment to persist it.',
         });
       }
 
