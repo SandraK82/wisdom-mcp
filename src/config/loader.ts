@@ -82,6 +82,10 @@ function loadEnvConfig(): PartialWisdomConfig {
     config.current_project = process.env.WISDOM_PROJECT_UUID;
   }
 
+  if (process.env.WISDOM_HUB_HOST) {
+    config.hub_host = process.env.WISDOM_HUB_HOST;
+  }
+
   return config;
 }
 

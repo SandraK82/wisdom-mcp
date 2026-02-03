@@ -107,10 +107,12 @@ export function getFragmentSignablePayload(
   return canonicalize({
     uuid: fragment.uuid,
     content: fragment.content,
-    language: fragment.language,
-    author: fragment.author,
-    project: fragment.project || null,
-    source_transform: fragment.source_transform || null,
+    creator: fragment.creator,
+    when: fragment.when,
+    tags: fragment.tags || [],
+    transform: fragment.transform || null,
+    confidence: fragment.confidence ?? 0.5,
+    evidence_type: fragment.evidence_type || 'unknown',
   });
 }
 
@@ -138,17 +140,20 @@ export async function verifyFragment(
 
 /**
  * Get signable payload for a Relation
+ * Format aligned with wisdom-hub: "{from}:{to}:{type}:{creator}"
  */
 export function getRelationSignablePayload(
   relation: Omit<CreateRelationRequest, 'signature'>
 ): string {
   return canonicalize({
     uuid: relation.uuid,
-    source: relation.source,
-    target: relation.target,
-    relation_type: relation.relation_type,
-    metadata: relation.metadata || {},
-    author: relation.author,
+    from: relation.from,
+    to: relation.to,
+    by: relation.by,
+    type: relation.type,
+    content: relation.content || '',
+    creator: relation.creator,
+    when: relation.when,
   });
 }
 
@@ -170,12 +175,22 @@ export async function verifyRelation(
   relation: Relation,
   publicKey: Uint8Array
 ): Promise<boolean> {
-  const payload = getRelationSignablePayload(relation);
+  const payload = getRelationSignablePayload({
+    uuid: relation.uuid,
+    from: relation.from,
+    to: relation.to,
+    by: relation.by,
+    type: relation.type,
+    content: relation.content,
+    creator: relation.creator,
+    when: relation.when,
+  });
   return verify(payload, relation.signature, publicKey);
 }
 
 /**
  * Get signable payload for a Tag
+ * Format aligned with wisdom-hub: "{name}:{category}:{creator}"
  */
 export function getTagSignablePayload(
   tag: Omit<CreateTagRequest, 'signature'>
@@ -183,9 +198,9 @@ export function getTagSignablePayload(
   return canonicalize({
     uuid: tag.uuid,
     name: tag.name,
+    content: tag.content,
     category: tag.category,
-    description: tag.description,
-    author: tag.author,
+    creator: tag.creator,
   });
 }
 
@@ -207,12 +222,19 @@ export async function verifyTag(
   tag: Tag,
   publicKey: Uint8Array
 ): Promise<boolean> {
-  const payload = getTagSignablePayload(tag);
+  const payload = getTagSignablePayload({
+    uuid: tag.uuid,
+    name: tag.name,
+    content: tag.content,
+    category: tag.category,
+    creator: tag.creator,
+  });
   return verify(payload, tag.signature, publicKey);
 }
 
 /**
  * Get signable payload for a Transform
+ * Format aligned with wisdom-hub: "{name}:{from}:{to}:{agent}"
  */
 export function getTransformSignablePayload(
   transform: Omit<CreateTransformRequest, 'signature'>
@@ -221,10 +243,11 @@ export function getTransformSignablePayload(
     uuid: transform.uuid,
     name: transform.name,
     description: transform.description,
-    domain: transform.domain,
-    spec: transform.spec,
     tags: transform.tags || [],
-    author: transform.author,
+    transform_to: transform.transform_to,
+    transform_from: transform.transform_from,
+    additional_data: transform.additional_data || '',
+    agent: transform.agent,
   });
 }
 
@@ -246,7 +269,16 @@ export async function verifyTransform(
   transform: Transform,
   publicKey: Uint8Array
 ): Promise<boolean> {
-  const payload = getTransformSignablePayload(transform);
+  const payload = getTransformSignablePayload({
+    uuid: transform.uuid,
+    name: transform.name,
+    description: transform.description,
+    tags: transform.tags,
+    transform_to: transform.transform_to,
+    transform_from: transform.transform_from,
+    additional_data: transform.additional_data,
+    agent: transform.agent,
+  });
   return verify(payload, transform.signature, publicKey);
 }
 

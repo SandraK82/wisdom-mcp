@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signTag, signRelation } from '../crypto/signing.js';
-import type { CreateTagRequest, CreateRelationRequest } from '../gateway/types.js';
+import type { CreateTagRequest, CreateRelationRequest, TagCategory } from '../gateway/types.js';
+import { createLocalAddress, createHubAddress } from '../gateway/types.js';
 
 export function createTagTools(): ToolDefinition[] {
   return [
@@ -18,7 +19,20 @@ export function createTagTools(): ToolDefinition[] {
             },
             category: {
               type: 'string',
-              description: 'Tag category (e.g., "topic", "domain", "type")',
+              enum: [
+                'PLATFORM',
+                'LANGUAGE',
+                'FRAMEWORK',
+                'LIBRARY',
+                'VERSION',
+                'DOMAIN',
+                'TYPE',
+                'ENVIRONMENT',
+                'ARCHITECTURE',
+                'COUNTRY',
+                'FIELD',
+              ],
+              description: 'Tag category',
             },
             description: {
               type: 'string',
@@ -31,18 +45,23 @@ export function createTagTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
         const uuid = uuidv4();
+        // Tags are infrastructure - creator is always hub-based
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
         const tagData: Omit<CreateTagRequest, 'signature'> = {
           uuid,
           name: args.name as string,
-          category: args.category as string,
-          description: (args.description as string) || '',
-          author: agentUuid,
+          category: args.category as TagCategory,
+          content: (args.description as string) || '',
+          creator: creatorAddr,
         };
 
         const signature = await signTag(tagData, privateKey);
@@ -55,7 +74,7 @@ export function createTagTools(): ToolDefinition[] {
           uuid: tag.uuid,
           name: tag.name,
           category: tag.category,
-          description: tag.description,
+          content: tag.content,
           created_at: tag.created_at,
         };
       },
@@ -113,9 +132,9 @@ export function createTagTools(): ToolDefinition[] {
               type: 'number',
               description: 'Maximum results (default: 100)',
             },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination',
+            cursor: {
+              type: 'string',
+              description: 'Cursor for pagination',
             },
           },
           required: [],
@@ -125,17 +144,19 @@ export function createTagTools(): ToolDefinition[] {
         const result = await context.gateway.listTags(
           args.category as string | undefined,
           (args.limit as number) || 100,
-          (args.offset as number) || 0
+          args.cursor as string | undefined
         );
 
+        const items = result.items || [];
         return {
-          tags: result.data.map((t) => ({
+          tags: items.map((t) => ({
             uuid: t.uuid,
             name: t.name,
             category: t.category,
-            description: t.description,
+            content: t.content,
           })),
-          total: result.total,
+          count: items.length,
+          next_cursor: result.next_cursor,
         };
       },
     },
@@ -162,6 +183,7 @@ export function createTagTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
@@ -177,22 +199,32 @@ export function createTagTools(): ToolDefinition[] {
           tagUuid = tag.uuid;
         }
 
-        // Create RELATES_TO relation from fragment to tag
         const uuid = uuidv4();
+        // Creator is always hub-based
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
+        const fragmentAddr = createLocalAddress('FRAGMENT', args.fragment as string);
+        const tagAddr = createLocalAddress('TAG', tagUuid);
+        const now = new Date().toISOString();
+
         const relationData: Omit<CreateRelationRequest, 'signature'> = {
           uuid,
-          source: args.fragment as string,
-          target: tagUuid,
-          relation_type: 'RELATES_TO',
-          metadata: { relation_purpose: 'tagging' },
-          author: agentUuid,
+          from: fragmentAddr,
+          to: tagAddr,
+          by: creatorAddr,
+          type: 'RELATED_TO',
+          content: 'Fragment tagged',
+          creator: creatorAddr,
+          when: now,
         };
 
         const signature = await signRelation(relationData, privateKey);
+        const projectUUID = context.config.config.current_project;
         const relation = await context.gateway.createRelation({
           ...relationData,
           signature,
-        });
+        }, projectUUID);
 
         return {
           uuid: relation.uuid,
@@ -225,19 +257,20 @@ export function createTagTools(): ToolDefinition[] {
       },
       handler: async (args, context) => {
         // Get existing tags for reference
-        const existingTags = await context.gateway.listTags(undefined, 100, 0);
+        const existingTags = await context.gateway.listTags(undefined, 100);
         const maxSuggestions = (args.max_suggestions as number) || 5;
+        const tagsData = existingTags.items || [];
 
         // This tool returns a request for the host to perform tag analysis
         // The host (Claude) should use the existing tags and content to suggest appropriate tags
         return {
           action: 'tag_suggestion_request',
           content: args.content,
-          existing_tags: existingTags.data.map((t) => ({
+          existing_tags: tagsData.map((t) => ({
             uuid: t.uuid,
             name: t.name,
             category: t.category,
-            description: t.description,
+            content: t.content,
           })),
           max_suggestions: maxSuggestions,
           instructions: `Please analyze the content and suggest up to ${maxSuggestions} relevant tags from the existing tags list. If no suitable tags exist, suggest new tags to create. Return your suggestions in the format:
@@ -245,7 +278,7 @@ export function createTagTools(): ToolDefinition[] {
 {
   "existing_tags": ["uuid1", "uuid2"], // UUIDs of existing tags that match
   "new_tags": [
-    {"name": "tag-name", "category": "topic", "description": "..."}
+    {"name": "tag-name", "category": "DOMAIN", "description": "..."}
   ]
 }`,
         };

@@ -53,9 +53,9 @@ export function createAgentTools(): ToolDefinition[] {
               type: 'number',
               description: 'Maximum results (default: 20)',
             },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination',
+            cursor: {
+              type: 'string',
+              description: 'Cursor for pagination',
             },
           },
           required: [],
@@ -64,20 +64,22 @@ export function createAgentTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const result = await context.gateway.listAgents(
           (args.limit as number) || 20,
-          (args.offset as number) || 0
+          args.cursor as string | undefined
         );
 
         const currentAgent = context.config.config.agent_uuid;
+        const items = result.items || [];
 
         return {
-          agents: result.data.map((a) => ({
+          agents: items.map((a) => ({
             uuid: a.uuid,
             description: a.description,
             reputation_score: a.reputation_score,
             is_current: a.uuid === currentAgent,
             created_at: a.created_at,
           })),
-          total: result.total,
+          count: items.length,
+          next_cursor: result.next_cursor,
         };
       },
     },
@@ -220,7 +222,8 @@ export function createAgentTools(): ToolDefinition[] {
         },
       },
       handler: async (args, context) => {
-        const votes = await context.gateway.getVotesForTarget(args.fragment as string);
+        const votesResult = await context.gateway.getVotesForTarget(args.fragment as string);
+        const votes = votesResult || [];
 
         return {
           fragment: args.fragment,
@@ -279,7 +282,7 @@ export function createAgentTools(): ToolDefinition[] {
             entity_type: 'fragment',
             perspective: perspective,
             trust_summary: fragment.trust_summary,
-            effective_trust: fragment.trust_summary.score,
+            effective_trust: fragment.trust_summary?.score ?? 0,
             note: 'Trust-path calculation not yet implemented. Using direct trust summary.',
           };
         } catch {

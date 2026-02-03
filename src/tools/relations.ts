@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signRelation } from '../crypto/signing.js';
 import type { CreateRelationRequest, RelationType } from '../gateway/types.js';
-import { createLocalAddress, addressToString } from '../gateway/types.js';
+import { createLocalAddress, createHubAddress, addressToString } from '../gateway/types.js';
 
 export function createRelationTools(): ToolDefinition[] {
   return [
@@ -49,13 +49,17 @@ export function createRelationTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
         const uuid = uuidv4();
-        const creatorAddr = createLocalAddress('AGENT', agentUuid);
+        // Creator is always hub-based
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
         const fromAddr = createLocalAddress('FRAGMENT', args.source as string);
         const toAddr = createLocalAddress('FRAGMENT', args.target as string);
         const now = new Date().toISOString();
@@ -72,10 +76,11 @@ export function createRelationTools(): ToolDefinition[] {
         };
 
         const signature = await signRelation(relationData, privateKey);
+        const projectUUID = context.config.config.current_project;
         const relation = await context.gateway.createRelation({
           ...relationData,
           signature,
-        });
+        }, projectUUID);
 
         return {
           uuid: relation.uuid,
@@ -166,6 +171,7 @@ export function createRelationTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
@@ -188,7 +194,10 @@ export function createRelationTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
-        const creatorAddr = createLocalAddress('AGENT', agentUuid);
+        // Creator is always hub-based
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
         const fragmentAddr = createLocalAddress('FRAGMENT', args.fragment as string);
         const tagAddr = createLocalAddress('TAG', typeTag.uuid);
         const now = new Date().toISOString();
@@ -206,10 +215,11 @@ export function createRelationTools(): ToolDefinition[] {
         };
 
         const signature = await signRelation(relationData, privateKey);
+        const projectUUID = context.config.config.current_project;
         const relation = await context.gateway.createRelation({
           ...relationData,
           signature,
-        });
+        }, projectUUID);
 
         return {
           uuid: relation.uuid,
@@ -244,13 +254,17 @@ export function createRelationTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
         const uuid = uuidv4();
-        const creatorAddr = createLocalAddress('AGENT', agentUuid);
+        // Creator is always hub-based
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
         const answerAddr = createLocalAddress('FRAGMENT', args.answer as string);
         const questionAddr = createLocalAddress('FRAGMENT', args.question as string);
         const now = new Date().toISOString();
@@ -267,10 +281,11 @@ export function createRelationTools(): ToolDefinition[] {
         };
 
         const signature = await signRelation(relationData, privateKey);
+        const projectUUID = context.config.config.current_project;
         const relation = await context.gateway.createRelation({
           ...relationData,
           signature,
-        });
+        }, projectUUID);
 
         return {
           uuid: relation.uuid,

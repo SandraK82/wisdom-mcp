@@ -85,7 +85,24 @@ npm install
 npm run build
 ```
 
-## Configuration
+## Quick Start
+
+### Claude Code (CLI)
+
+```bash
+# 1. Build
+npm install && npm run build
+
+# 2. Add to Claude Code
+claude mcp add wisdom-mcp \
+  -s local \
+  -e WISDOM_GATEWAY_URL=http://localhost:8080 \
+  -- node $(pwd)/dist/index.js
+
+# 3. Start new session - agent will auto-configure
+```
+
+**Full setup guide**: [docs/SETUP-CLAUDE-CODE.md](docs/SETUP-CLAUDE-CODE.md)
 
 ### Claude Desktop
 
@@ -106,6 +123,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 ```
 
 > **Note**: The gateway should be configured to connect to the public hub at `https://hub1.wisdom.spawning.de` or your own hub instance.
+
+## Configuration
 
 ### Configuration Files
 

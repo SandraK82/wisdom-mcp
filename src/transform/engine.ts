@@ -32,9 +32,9 @@ export class TransformEngine {
     // Search by domain
     if (domain && domain !== 'general') {
       try {
-        const transforms = await this.gateway.listTransforms(domain, 1, 0);
-        if (transforms.data.length > 0) {
-          return transforms.data[0];
+        const transforms = await this.gateway.listTransforms(domain, 1);
+        if (transforms.items.length > 0) {
+          return transforms.items[0];
         }
       } catch {
         // No transforms found
@@ -56,7 +56,7 @@ export class TransformEngine {
     } = {}
   ): Promise<TransformDelegationRequest> {
     const transform = await this.findTransform(options.domain, options.transformUuid);
-    const transformSpec = transform?.spec || null;
+    const transformSpec = transform?.additional_data || null;
 
     return {
       action: 'transform_request',
@@ -86,7 +86,7 @@ export class TransformEngine {
     const transform = transformUuid
       ? await this.findTransform(undefined, transformUuid)
       : null;
-    const transformSpec = transform?.spec || null;
+    const transformSpec = transform?.additional_data || null;
 
     return {
       action: 'transform_request',

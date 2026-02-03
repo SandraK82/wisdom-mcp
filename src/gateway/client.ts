@@ -14,7 +14,7 @@ import type {
   CreateProjectRequest,
   TrustVote,
   CreateTrustVoteRequest,
-  PaginatedResponse,
+  CursorPaginatedResponse,
   HubStatus,
   ResourceLevel,
 } from './types.js';
@@ -36,6 +36,13 @@ export class GatewayClient {
    */
   getLastHubStatus(): HubStatus | null {
     return this.lastHubStatus;
+  }
+
+  /**
+   * Get the timestamp of the last hub status update
+   */
+  getLastHubStatusTime(): number {
+    return this.lastHubStatusTime;
   }
 
   /**
@@ -65,12 +72,16 @@ export class GatewayClient {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    projectUUID?: string
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
+    if (projectUUID) {
+      headers['X-Wisdom-Project'] = projectUUID;
+    }
 
     const response = await fetch(url, {
       method,
@@ -96,11 +107,16 @@ export class GatewayClient {
 
     // Handle empty responses
     const text = await response.text();
-    if (!text) {
+    if (!text || text === 'null') {
       return {} as T;
     }
 
-    return JSON.parse(text) as T;
+    const parsed = JSON.parse(text);
+    // Handle null JSON response (gateway returns null for empty lists)
+    if (parsed === null) {
+      return {} as T;
+    }
+    return parsed as T;
   }
 
   /**
@@ -154,74 +170,96 @@ export class GatewayClient {
   // ============================================================================
 
   async createAgent(agent: CreateAgentRequest): Promise<Agent> {
-    return this.request<Agent>('POST', '/api/agents', agent);
+    return this.request<Agent>('POST', '/api/v1/agents', agent);
   }
 
   async getAgent(uuid: string): Promise<Agent> {
-    return this.request<Agent>('GET', `/api/agents/${uuid}`);
+    return this.request<Agent>('GET', `/api/v1/agents/${uuid}`);
   }
 
-  async listAgents(limit = 20, offset = 0): Promise<PaginatedResponse<Agent>> {
-    return this.request<PaginatedResponse<Agent>>(
+  async listAgents(limit = 20, cursor?: string): Promise<CursorPaginatedResponse<Agent>> {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    if (cursor) params.set('cursor', cursor);
+
+    const result = await this.request<CursorPaginatedResponse<Agent>>(
       'GET',
-      `/api/agents?limit=${limit}&offset=${offset}`
+      `/api/v1/agents?${params.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   // ============================================================================
   // Fragment API
   // ============================================================================
 
-  async createFragment(fragment: CreateFragmentRequest): Promise<Fragment> {
-    return this.request<Fragment>('POST', '/api/fragments', fragment);
+  async createFragment(fragment: CreateFragmentRequest, projectUUID?: string): Promise<Fragment> {
+    return this.request<Fragment>('POST', '/api/v1/fragments', fragment, projectUUID);
   }
 
   async getFragment(uuid: string): Promise<Fragment> {
-    return this.request<Fragment>('GET', `/api/fragments/${uuid}`);
+    return this.request<Fragment>('GET', `/api/v1/fragments/${uuid}`);
   }
 
   async searchFragments(
     params: SearchFragmentsRequest
-  ): Promise<PaginatedResponse<Fragment>> {
+  ): Promise<CursorPaginatedResponse<Fragment>> {
     const queryParams = new URLSearchParams();
     if (params.query) queryParams.set('query', params.query);
     if (params.author) queryParams.set('author', params.author);
     if (params.project) queryParams.set('project', params.project);
     if (params.state) queryParams.set('state', params.state);
     if (params.limit) queryParams.set('limit', String(params.limit));
-    if (params.offset) queryParams.set('offset', String(params.offset));
     if (params.tags) {
       for (const tag of params.tags) {
         queryParams.append('tag', tag);
       }
     }
 
-    return this.request<PaginatedResponse<Fragment>>(
+    const result = await this.request<CursorPaginatedResponse<Fragment>>(
       'GET',
-      `/api/fragments?${queryParams.toString()}`
+      `/api/v1/fragments?${queryParams.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   async listFragments(
     limit = 20,
-    offset = 0
-  ): Promise<PaginatedResponse<Fragment>> {
-    return this.request<PaginatedResponse<Fragment>>(
+    cursor?: string
+  ): Promise<CursorPaginatedResponse<Fragment>> {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    if (cursor) params.set('cursor', cursor);
+
+    const result = await this.request<CursorPaginatedResponse<Fragment>>(
       'GET',
-      `/api/fragments?limit=${limit}&offset=${offset}`
+      `/api/v1/fragments?${params.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   // ============================================================================
   // Relation API
   // ============================================================================
 
-  async createRelation(relation: CreateRelationRequest): Promise<Relation> {
-    return this.request<Relation>('POST', '/api/relations', relation);
+  async createRelation(relation: CreateRelationRequest, projectUUID?: string): Promise<Relation> {
+    return this.request<Relation>('POST', '/api/v1/relations', relation, projectUUID);
   }
 
   async getRelation(uuid: string): Promise<Relation> {
-    return this.request<Relation>('GET', `/api/relations/${uuid}`);
+    return this.request<Relation>('GET', `/api/v1/relations/${uuid}`);
   }
 
   async getRelationsForEntity(
@@ -231,17 +269,26 @@ export class GatewayClient {
     const params = new URLSearchParams();
     params.set('entity', entityUuid);
     if (direction) params.set('direction', direction);
-    return this.request<Relation[]>('GET', `/api/relations?${params.toString()}`);
+    return this.request<Relation[]>('GET', `/api/v1/relations?${params.toString()}`);
   }
 
   async listRelations(
     limit = 100,
-    offset = 0
-  ): Promise<PaginatedResponse<Relation>> {
-    return this.request<PaginatedResponse<Relation>>(
+    cursor?: string
+  ): Promise<CursorPaginatedResponse<Relation>> {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    if (cursor) params.set('cursor', cursor);
+
+    const result = await this.request<CursorPaginatedResponse<Relation>>(
       'GET',
-      `/api/relations?limit=${limit}&offset=${offset}`
+      `/api/v1/relations?${params.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   // ============================================================================
@@ -249,17 +296,17 @@ export class GatewayClient {
   // ============================================================================
 
   async createTag(tag: CreateTagRequest): Promise<Tag> {
-    return this.request<Tag>('POST', '/api/tags', tag);
+    return this.request<Tag>('POST', '/api/v1/tags', tag);
   }
 
   async getTag(uuid: string): Promise<Tag> {
-    return this.request<Tag>('GET', `/api/tags/${uuid}`);
+    return this.request<Tag>('GET', `/api/v1/tags/${uuid}`);
   }
 
   async getTagByName(name: string): Promise<Tag | null> {
     try {
       const tags = await this.listTags();
-      return tags.data.find((t) => t.name === name) || null;
+      return tags.items.find((t) => t.name === name) || null;
     } catch {
       return null;
     }
@@ -268,43 +315,55 @@ export class GatewayClient {
   async listTags(
     category?: string,
     limit = 100,
-    offset = 0
-  ): Promise<PaginatedResponse<Tag>> {
+    cursor?: string
+  ): Promise<CursorPaginatedResponse<Tag>> {
     const params = new URLSearchParams();
     params.set('limit', String(limit));
-    params.set('offset', String(offset));
+    if (cursor) params.set('cursor', cursor);
     if (category) params.set('category', category);
-    return this.request<PaginatedResponse<Tag>>(
+
+    const result = await this.request<CursorPaginatedResponse<Tag>>(
       'GET',
-      `/api/tags?${params.toString()}`
+      `/api/v1/tags?${params.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   // ============================================================================
   // Transform API
   // ============================================================================
 
-  async createTransform(transform: CreateTransformRequest): Promise<Transform> {
-    return this.request<Transform>('POST', '/api/transforms', transform);
+  async createTransform(transform: CreateTransformRequest, projectUUID?: string): Promise<Transform> {
+    return this.request<Transform>('POST', '/api/v1/transforms', transform, projectUUID);
   }
 
   async getTransform(uuid: string): Promise<Transform> {
-    return this.request<Transform>('GET', `/api/transforms/${uuid}`);
+    return this.request<Transform>('GET', `/api/v1/transforms/${uuid}`);
   }
 
   async listTransforms(
     domain?: string,
     limit = 20,
-    offset = 0
-  ): Promise<PaginatedResponse<Transform>> {
+    cursor?: string
+  ): Promise<CursorPaginatedResponse<Transform>> {
     const params = new URLSearchParams();
     params.set('limit', String(limit));
-    params.set('offset', String(offset));
+    if (cursor) params.set('cursor', cursor);
     if (domain) params.set('domain', domain);
-    return this.request<PaginatedResponse<Transform>>(
+
+    const result = await this.request<CursorPaginatedResponse<Transform>>(
       'GET',
-      `/api/transforms?${params.toString()}`
+      `/api/v1/transforms?${params.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   // ============================================================================
@@ -312,33 +371,39 @@ export class GatewayClient {
   // ============================================================================
 
   async createProject(project: CreateProjectRequest): Promise<Project> {
-    return this.request<Project>('POST', '/api/projects', project);
+    return this.request<Project>('POST', '/api/v1/projects', project);
   }
 
   async getProject(uuid: string): Promise<Project> {
-    return this.request<Project>('GET', `/api/projects/${uuid}`);
+    return this.request<Project>('GET', `/api/v1/projects/${uuid}`);
   }
 
   async listProjects(
-    owner?: string,
+    agentUuid?: string,
     limit = 20,
-    offset = 0
-  ): Promise<PaginatedResponse<Project>> {
+    cursor?: string
+  ): Promise<CursorPaginatedResponse<Project>> {
     const params = new URLSearchParams();
     params.set('limit', String(limit));
-    params.set('offset', String(offset));
-    if (owner) params.set('owner', owner);
-    return this.request<PaginatedResponse<Project>>(
+    if (cursor) params.set('cursor', cursor);
+    if (agentUuid) params.set('agent_uuid', agentUuid);
+
+    const result = await this.request<CursorPaginatedResponse<Project>>(
       'GET',
-      `/api/projects?${params.toString()}`
+      `/api/v1/projects?${params.toString()}`
     );
+
+    return {
+      items: result.items || [],
+      next_cursor: result.next_cursor,
+    };
   }
 
   async updateProject(
     uuid: string,
     updates: Partial<CreateProjectRequest>
   ): Promise<Project> {
-    return this.request<Project>('PUT', `/api/projects/${uuid}`, updates);
+    return this.request<Project>('PUT', `/api/v1/projects/${uuid}`, updates);
   }
 
   // ============================================================================
@@ -346,11 +411,11 @@ export class GatewayClient {
   // ============================================================================
 
   async createTrustVote(vote: CreateTrustVoteRequest): Promise<TrustVote> {
-    return this.request<TrustVote>('POST', '/api/votes', vote);
+    return this.request<TrustVote>('POST', '/api/v1/votes', vote);
   }
 
   async getVotesForTarget(targetUuid: string): Promise<TrustVote[]> {
-    return this.request<TrustVote[]>('GET', `/api/votes?target=${targetUuid}`);
+    return this.request<TrustVote[]>('GET', `/api/v1/votes?target=${targetUuid}`);
   }
 
   // ============================================================================
@@ -358,7 +423,7 @@ export class GatewayClient {
   // ============================================================================
 
   async healthCheck(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('GET', '/api/health');
+    return this.request<{ status: string }>('GET', '/health');
   }
 
   /**

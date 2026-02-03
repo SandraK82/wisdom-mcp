@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signFragment } from '../crypto/signing.js';
 import type { CreateFragmentRequest, SearchFragmentsRequest } from '../gateway/types.js';
+import { createLocalAddress, createHubAddress, addressToString } from '../gateway/types.js';
 
 export function createFragmentTools(): ToolDefinition[] {
   return [
@@ -15,10 +16,6 @@ export function createFragmentTools(): ToolDefinition[] {
             content: {
               type: 'string',
               description: 'The content of the fragment (English recommended for interoperability)',
-            },
-            language: {
-              type: 'string',
-              description: 'Language code (default: en)',
             },
             project: {
               type: 'string',
@@ -35,35 +32,44 @@ export function createFragmentTools(): ToolDefinition[] {
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
         const uuid = uuidv4();
+        const sourceTransform = args.source_transform as string | undefined;
+        const projectUUID = (args.project as string) || context.config.config.current_project;
+
+        // Creator is always hub-based (agent lives on hub)
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
+
         const fragmentData: Omit<CreateFragmentRequest, 'signature'> = {
           uuid,
           content: args.content as string,
-          language: (args.language as string) || 'en',
-          author: agentUuid,
-          project: (args.project as string) || context.config.config.current_project || null,
-          source_transform: (args.source_transform as string) || null,
+          creator: creatorAddr,
+          when: new Date().toISOString(),
+          tags: [],
+          transform: sourceTransform ? createLocalAddress('TRANSFORMATION', sourceTransform) : undefined,
+          confidence: 0.8,
+          evidence_type: 'unknown',
         };
 
         const signature = await signFragment(fragmentData, privateKey);
         const fragment = await context.gateway.createFragment({
           ...fragmentData,
           signature,
-        });
+        }, projectUUID);
 
         return {
           uuid: fragment.uuid,
           content: fragment.content,
-          language: fragment.language,
-          author: fragment.author,
-          project: fragment.project,
+          creator: addressToString(fragment.creator),
+          when: fragment.when,
           state: fragment.state,
-          created_at: fragment.created_at,
         };
       },
     },
@@ -122,10 +128,6 @@ export function createFragmentTools(): ToolDefinition[] {
               type: 'number',
               description: 'Maximum results (default: 20)',
             },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination',
-            },
           },
           required: [],
         },
@@ -138,22 +140,20 @@ export function createFragmentTools(): ToolDefinition[] {
           project: (args.project as string) || context.config.config.current_project,
           state: args.state as SearchFragmentsRequest['state'],
           limit: (args.limit as number) || 20,
-          offset: (args.offset as number) || 0,
         };
 
         const result = await context.gateway.searchFragments(params);
+        const items = result.items || [];
         return {
-          fragments: result.data.map((f) => ({
+          fragments: items.map((f) => ({
             uuid: f.uuid,
             content: f.content.substring(0, 200) + (f.content.length > 200 ? '...' : ''),
-            language: f.language,
-            author: f.author,
+            creator: addressToString(f.creator),
             state: f.state,
-            trust_score: f.trust_summary.score,
+            trust_score: f.trust_summary?.score ?? 0,
           })),
-          total: result.total,
-          limit: result.limit,
-          offset: result.offset,
+          count: items.length,
+          next_cursor: result.next_cursor,
         };
       },
     },
@@ -169,9 +169,9 @@ export function createFragmentTools(): ToolDefinition[] {
               type: 'number',
               description: 'Maximum results (default: 20)',
             },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination',
+            cursor: {
+              type: 'string',
+              description: 'Cursor for pagination',
             },
             project: {
               type: 'string',
@@ -183,25 +183,27 @@ export function createFragmentTools(): ToolDefinition[] {
       },
       handler: async (args, context) => {
         const limit = (args.limit as number) || 20;
-        const offset = (args.offset as number) || 0;
+        const cursor = args.cursor as string | undefined;
         const project = (args.project as string) || context.config.config.current_project;
 
         let result;
         if (project) {
-          result = await context.gateway.searchFragments({ project, limit, offset });
+          result = await context.gateway.searchFragments({ project, limit });
         } else {
-          result = await context.gateway.listFragments(limit, offset);
+          result = await context.gateway.listFragments(limit, cursor);
         }
 
+        const items = result.items || [];
         return {
-          fragments: result.data.map((f) => ({
+          fragments: items.map((f) => ({
             uuid: f.uuid,
             content: f.content.substring(0, 100) + (f.content.length > 100 ? '...' : ''),
-            language: f.language,
+            creator: addressToString(f.creator),
             state: f.state,
             created_at: f.created_at,
           })),
-          total: result.total,
+          count: items.length,
+          next_cursor: result.next_cursor,
         };
       },
     },

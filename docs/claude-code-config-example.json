@@ -1,4 +1,7 @@
 {
+  "_comment": "Claude Desktop MCP configuration example",
+  "_location": "~/Library/Application Support/Claude/claude_desktop_config.json (macOS)",
+
   "mcpServers": {
     "wisdom": {
       "command": "node",

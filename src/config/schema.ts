@@ -11,6 +11,9 @@ export const WisdomConfigSchema = z.object({
   // Gateway connection
   gateway_url: z.string().url().default('http://localhost:8080'),
 
+  // Hub connection (for address construction)
+  hub_host: z.string().optional(), // e.g., "hub1.wisdom.spawning.de:443"
+
   // Current context (persistent state)
   current_project: z.string().uuid().optional(),
   default_tags: z.array(z.string().uuid()).optional(),

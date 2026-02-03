@@ -29,6 +29,13 @@ export function createLocalAddress(domain: AddressDomain, entity: string): Addre
 }
 
 /**
+ * Create a hub address (with hub server specified)
+ */
+export function createHubAddress(hubHost: string, domain: AddressDomain, entity: string): Address {
+  return { server_port: hubHost, domain, entity };
+}
+
+/**
  * Convert an Address to its string representation
  * Format: "server:port/DOMAIN/entity-uuid" or "/DOMAIN/entity-uuid" for local
  */
@@ -351,6 +358,8 @@ export interface CreateTransformRequest {
 // Project (Gateway-only, not federated)
 // ============================================================================
 
+export type ProjectVisibility = 'public' | 'private';
+
 export interface Project {
   uuid: string;
   name: string;
@@ -358,6 +367,7 @@ export interface Project {
   owner: string; // Agent UUID
   default_tags: string[];
   default_transform: string | null;
+  visibility: ProjectVisibility;
   created_at: string;
   updated_at: string;
 }
@@ -369,6 +379,7 @@ export interface CreateProjectRequest {
   owner: string;
   default_tags?: string[];
   default_transform?: string | null;
+  visibility?: ProjectVisibility;
 }
 
 // ============================================================================

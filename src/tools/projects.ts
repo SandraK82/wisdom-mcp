@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
-import type { CreateProjectRequest } from '../gateway/types.js';
+import type { CreateProjectRequest, ProjectVisibility } from '../gateway/types.js';
 
 export function createProjectTools(): ToolDefinition[] {
   return [
@@ -102,6 +102,11 @@ export function createProjectTools(): ToolDefinition[] {
               type: 'string',
               description: 'Default transform UUID for this project',
             },
+            visibility: {
+              type: 'string',
+              enum: ['public', 'private'],
+              description: 'Project visibility (default: public). Public projects sync to hub.',
+            },
             set_as_current: {
               type: 'boolean',
               description: 'Set this project as current after creation (default: true)',
@@ -125,6 +130,7 @@ export function createProjectTools(): ToolDefinition[] {
           owner: agentUuid,
           default_tags: (args.default_tags as string[]) || [],
           default_transform: (args.default_transform as string) || null,
+          visibility: (args.visibility as ProjectVisibility) || 'public',
         };
 
         const project = await context.gateway.createProject(projectData);
@@ -140,6 +146,7 @@ export function createProjectTools(): ToolDefinition[] {
           name: project.name,
           description: project.description,
           owner: project.owner,
+          visibility: project.visibility,
           created_at: project.created_at,
           is_current: setAsCurrent,
         };
@@ -157,9 +164,9 @@ export function createProjectTools(): ToolDefinition[] {
               type: 'number',
               description: 'Maximum results (default: 20)',
             },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination',
+            cursor: {
+              type: 'string',
+              description: 'Cursor for pagination',
             },
           },
           required: [],
@@ -175,20 +182,22 @@ export function createProjectTools(): ToolDefinition[] {
         const result = await context.gateway.listProjects(
           agentUuid,
           (args.limit as number) || 20,
-          (args.offset as number) || 0
+          args.cursor as string | undefined
         );
 
         const currentProject = context.config.config.current_project;
+        const items = result.items || [];
 
         return {
-          projects: result.data.map((p) => ({
+          projects: items.map((p) => ({
             uuid: p.uuid,
             name: p.name,
             description: p.description,
             is_current: p.uuid === currentProject,
             created_at: p.created_at,
           })),
-          total: result.total,
+          count: items.length,
+          next_cursor: result.next_cursor,
           current_project: currentProject,
         };
       },
@@ -222,6 +231,11 @@ export function createProjectTools(): ToolDefinition[] {
               type: 'string',
               description: 'New default transform',
             },
+            visibility: {
+              type: 'string',
+              enum: ['public', 'private'],
+              description: 'New visibility (public syncs to hub, private stays local)',
+            },
           },
           required: [],
         },
@@ -239,6 +253,7 @@ export function createProjectTools(): ToolDefinition[] {
         if (args.default_tags) updates.default_tags = args.default_tags as string[];
         if (args.default_transform !== undefined)
           updates.default_transform = args.default_transform as string | null;
+        if (args.visibility) updates.visibility = args.visibility as ProjectVisibility;
 
         const project = await context.gateway.updateProject(uuid, updates);
 
@@ -246,6 +261,7 @@ export function createProjectTools(): ToolDefinition[] {
           uuid: project.uuid,
           name: project.name,
           description: project.description,
+          visibility: project.visibility,
           default_tags: project.default_tags,
           default_transform: project.default_transform,
           updated_at: project.updated_at,

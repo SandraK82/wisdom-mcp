@@ -4,6 +4,7 @@
 
 import type { ToolDefinition } from '../server.js';
 import type { Relation } from '../gateway/types.js';
+import { addressToString } from '../gateway/types.js';
 
 // ============================================================================
 // Types
@@ -51,13 +52,14 @@ function calculateEvidenceBalance(thesisId: string, relations: Relation[]): Evid
   };
 
   for (const relation of relations) {
-    if (relation.target === thesisId) {
+    // Compare target entity UUID with thesisId
+    if (relation.to.entity === thesisId) {
       const confidence = relation.confidence ?? 1.0;
-      if (relation.relation_type === 'SUPPORTS') {
-        balance.supporting.push({ fragment_id: relation.source, confidence });
+      if (relation.type === 'SUPPORTS') {
+        balance.supporting.push({ fragment_id: relation.from.entity, confidence });
         balance.support_score += confidence;
-      } else if (relation.relation_type === 'CONTRADICTS') {
-        balance.contradicting.push({ fragment_id: relation.source, confidence });
+      } else if (relation.type === 'CONTRADICTS') {
+        balance.contradicting.push({ fragment_id: relation.from.entity, confidence });
         balance.contradict_score += confidence;
       }
     }
@@ -99,10 +101,11 @@ export function createValidityTools(): ToolDefinition[] {
         }
 
         // Get all relations involving this fragment
-        const relations = await context.gateway.listRelations(100, 0);
+        const relations = await context.gateway.listRelations(100);
+        const relationsData = relations.items || [];
 
         // Calculate evidence balance
-        const balance = calculateEvidenceBalance(fragmentId, relations.data);
+        const balance = calculateEvidenceBalance(fragmentId, relationsData);
 
         return {
           thesis: {
@@ -152,32 +155,33 @@ export function createValidityTools(): ToolDefinition[] {
         }
 
         // Get all relations
-        const relations = await context.gateway.listRelations(100, 0);
+        const relations = await context.gateway.listRelations(100);
+        const relationsData = relations.items || [];
 
         // Find contradicting relations
-        const contradictions = relations.data.filter(
-          (r) => r.target === fragmentId && r.relation_type === 'CONTRADICTS'
+        const contradictions = relationsData.filter(
+          (r) => r.to.entity === fragmentId && r.type === 'CONTRADICTS'
         );
 
         // Get the contradicting fragments
         const contradictingFragments = await Promise.all(
           contradictions.map(async (rel) => {
             try {
-              const frag = await context.gateway.getFragment(rel.source);
+              const frag = await context.gateway.getFragment(rel.from.entity);
               return {
                 uuid: frag.uuid,
                 content: frag.content.substring(0, 200) + (frag.content.length > 200 ? '...' : ''),
                 confidence: frag.confidence,
                 relation_confidence: rel.confidence,
-                author: frag.author,
+                creator: addressToString(frag.creator),
               };
             } catch {
               return {
-                uuid: rel.source,
+                uuid: rel.from.entity,
                 content: '[Fragment not found]',
                 confidence: 0,
                 relation_confidence: rel.confidence,
-                author: 'unknown',
+                creator: 'unknown',
               };
             }
           })
@@ -216,7 +220,8 @@ export function createValidityTools(): ToolDefinition[] {
         const maxDepth = (args.max_depth as number) || 10;
 
         // Get all relations
-        const relations = await context.gateway.listRelations(500, 0);
+        const relations = await context.gateway.listRelations(500);
+        const relationsData = relations.items || [];
 
         // Build derivation chain
         const chain: Array<{
@@ -243,11 +248,11 @@ export function createValidityTools(): ToolDefinition[] {
           visited.add(fragId);
 
           // Find DERIVED_FROM relations for this fragment
-          const derivedFromRelations = relations.data.filter(
-            (r) => r.source === fragId && r.relation_type === 'DERIVED_FROM'
+          const derivedFromRelations = relationsData.filter(
+            (r) => r.from.entity === fragId && r.type === 'DERIVED_FROM'
           );
 
-          const derivesFrom = derivedFromRelations.map((r) => r.target);
+          const derivesFrom = derivedFromRelations.map((r) => r.to.entity);
 
           chain.push({
             fragment_id: fragId,
@@ -333,14 +338,15 @@ export function createValidityTools(): ToolDefinition[] {
           project: project || undefined,
           limit: 50,
         });
+        const searchData = searchResult.items || [];
 
         // Filter by confidence and calculate relevance
-        const filteredFragments = searchResult.data
+        const filteredFragments = searchData
           .filter((f) => (f.confidence ?? 0.5) >= minConfidence)
           .map((f) => ({
             ...f,
             // Simple relevance score based on trust and confidence
-            relevance_score: (f.trust_summary.score + 1) / 2 * (f.confidence ?? 0.5),
+            relevance_score: ((f.trust_summary?.score ?? 0) + 1) / 2 * (f.confidence ?? 0.5),
           }))
           .sort((a, b) => b.relevance_score - a.relevance_score);
 
@@ -362,14 +368,14 @@ export function createValidityTools(): ToolDefinition[] {
           task: taskDescription,
           token_budget: tokenBudget,
           estimated_tokens: Math.ceil(totalChars / charsPerToken),
-          fragments_found: searchResult.total,
+          fragments_found: searchData.length,
           fragments_returned: selectedFragments.length,
           fragments: selectedFragments.map((f) => ({
             uuid: f.uuid,
             content: f.content,
             confidence: f.confidence,
             evidence_type: f.evidence_type,
-            trust_score: f.trust_summary.score,
+            trust_score: f.trust_summary?.score ?? 0,
             relevance_score: Math.round(f.relevance_score * 100) / 100,
           })),
         };

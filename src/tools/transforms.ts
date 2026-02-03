@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signTransform, signFragment } from '../crypto/signing.js';
 import type { CreateTransformRequest, CreateFragmentRequest } from '../gateway/types.js';
+import { createLocalAddress, createHubAddress } from '../gateway/types.js';
 
 export function createTransformTools(): ToolDefinition[] {
   return [
@@ -41,15 +42,16 @@ export function createTransformTools(): ToolDefinition[] {
         if (args.transform_uuid) {
           try {
             const transform = await context.gateway.getTransform(args.transform_uuid as string);
-            transformSpec = transform.spec;
+            transformSpec = transform.additional_data || '';
           } catch {
             // Transform not found, use default
           }
         } else if (domain !== 'general') {
           try {
-            const transforms = await context.gateway.listTransforms(domain, 1, 0);
-            if (transforms.data.length > 0) {
-              transformSpec = transforms.data[0].spec;
+            const transforms = await context.gateway.listTransforms(domain, 1);
+            const items = transforms.items || [];
+            if (items.length > 0) {
+              transformSpec = items[0].additional_data || '';
             }
           } catch {
             // No transforms found for domain
@@ -124,14 +126,14 @@ After receiving this response, the fragments will be signed and stored.`,
         if (args.transform_uuid) {
           try {
             const transform = await context.gateway.getTransform(args.transform_uuid as string);
-            transformSpec = transform.spec;
+            transformSpec = transform.additional_data || '';
           } catch {
             // Transform not found
           }
-        } else if (fragment.source_transform) {
+        } else if (fragment.transform && fragment.transform.entity) {
           try {
-            const transform = await context.gateway.getTransform(fragment.source_transform);
-            transformSpec = transform.spec;
+            const transform = await context.gateway.getTransform(fragment.transform.entity);
+            transformSpec = transform.additional_data || '';
           } catch {
             // Original transform not found
           }
@@ -142,7 +144,7 @@ After receiving this response, the fragments will be signed and stored.`,
           action: 'transform_request',
           direction: 'decode',
           input: fragment.content,
-          source_language: fragment.language,
+          source_language: 'en', // Fragments are stored in English
           target_language: args.target_language,
           fragment_uuid: fragment.uuid,
           transform_spec: transformSpec || null,
@@ -197,14 +199,20 @@ Return your result as JSON:
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
         const fragments = args.fragments as Array<{ content: string; type?: string }>;
-        const project = (args.project as string) || context.config.config.current_project;
         const sourceTransform = args.source_transform as string | undefined;
+        const projectUUID = (args.project as string) || context.config.config.current_project;
+
+        // Creator is always hub-based
+        const creatorAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
 
         const results = [];
 
@@ -213,17 +221,19 @@ Return your result as JSON:
           const fragmentData: Omit<CreateFragmentRequest, 'signature'> = {
             uuid,
             content: frag.content,
-            language: 'en',
-            author: agentUuid,
-            project: project || null,
-            source_transform: sourceTransform || null,
+            creator: creatorAddr,
+            when: new Date().toISOString(),
+            tags: [],
+            transform: sourceTransform ? createLocalAddress('TRANSFORMATION', sourceTransform) : undefined,
+            confidence: 0.8,
+            evidence_type: 'unknown',
           };
 
           const signature = await signFragment(fragmentData, privateKey);
           const created = await context.gateway.createFragment({
             ...fragmentData,
             signature,
-          });
+          }, projectUUID);
 
           results.push({
             uuid: created.uuid,
@@ -282,19 +292,21 @@ Return your result as JSON:
       handler: async (args, context) => {
         const result = await context.gateway.listTransforms(
           args.domain as string | undefined,
-          (args.limit as number) || 20,
-          0
+          (args.limit as number) || 20
         );
 
+        const items = result.items || [];
         return {
-          transforms: result.data.map((t) => ({
+          transforms: items.map((t) => ({
             uuid: t.uuid,
             name: t.name,
             description: t.description,
-            domain: t.domain,
+            transform_to: t.transform_to,
+            transform_from: t.transform_from,
             version: t.version,
           })),
-          total: result.total,
+          count: items.length,
+          next_cursor: result.next_cursor,
         };
       },
     },
@@ -314,13 +326,17 @@ Return your result as JSON:
               type: 'string',
               description: 'Transform description',
             },
-            domain: {
+            transform_to: {
               type: 'string',
-              description: 'Domain (e.g., "software", "science", "general")',
+              description: 'Target format (e.g., "text/markdown")',
             },
-            spec: {
+            transform_from: {
               type: 'string',
-              description: 'Transform specification (Markdown)',
+              description: 'Source format (e.g., "text/plain")',
+            },
+            additional_data: {
+              type: 'string',
+              description: 'Additional configuration (JSON)',
             },
             tags: {
               type: 'array',
@@ -328,39 +344,50 @@ Return your result as JSON:
               description: 'Tag UUIDs',
             },
           },
-          required: ['name', 'description', 'domain', 'spec'],
+          required: ['name', 'description', 'transform_to', 'transform_from'],
         },
       },
       handler: async (args, context) => {
         const privateKey = context.keyManager.getPrivateKey();
         const agentUuid = context.config.config.agent_uuid;
+        const hubHost = context.config.config.hub_host;
 
         if (!agentUuid) {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
         const uuid = uuidv4();
+        // Agent/creator is always hub-based
+        const agentAddr = hubHost
+          ? createHubAddress(hubHost, 'AGENT', agentUuid)
+          : createLocalAddress('AGENT', agentUuid);
+        const tagAddresses = ((args.tags as string[]) || []).map((t) =>
+          createLocalAddress('TAG', t)
+        );
         const transformData: Omit<CreateTransformRequest, 'signature'> = {
           uuid,
           name: args.name as string,
           description: args.description as string,
-          domain: args.domain as string,
-          spec: args.spec as string,
-          tags: (args.tags as string[]) || [],
-          author: agentUuid,
+          transform_to: args.transform_to as string,
+          transform_from: args.transform_from as string,
+          additional_data: (args.additional_data as string) || '',
+          tags: tagAddresses,
+          agent: agentAddr,
         };
 
         const signature = await signTransform(transformData, privateKey);
+        const projectUUID = context.config.config.current_project;
         const transform = await context.gateway.createTransform({
           ...transformData,
           signature,
-        });
+        }, projectUUID);
 
         return {
           uuid: transform.uuid,
           name: transform.name,
           description: transform.description,
-          domain: transform.domain,
+          transform_to: transform.transform_to,
+          transform_from: transform.transform_from,
           created_at: transform.created_at,
         };
       },
