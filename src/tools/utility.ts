@@ -100,8 +100,8 @@ export function createUtilityTools(): ToolDefinition[] {
               uuid,
               public_key: keypair.publicKeyBase64,
               description,
-              trust: { direct: {}, default_trust: 0 },
-              primary_hub: null,
+              trust: { num_trusts: 0, trusts: [] },
+              primary_hub: '',
             };
 
             const signature = await signAgent(agentData, keypair.privateKey);

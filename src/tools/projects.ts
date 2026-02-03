@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import type { CreateProjectRequest, ProjectVisibility } from '../gateway/types.js';
 
@@ -36,7 +35,7 @@ export function createProjectTools(): ToolDefinition[] {
         return {
           message: `Current project set to: ${project.name}`,
           project: {
-            uuid: project.uuid,
+            id: project.id,
             name: project.name,
             description: project.description,
           },
@@ -98,10 +97,6 @@ export function createProjectTools(): ToolDefinition[] {
               items: { type: 'string' },
               description: 'Default tag UUIDs for fragments in this project',
             },
-            default_transform: {
-              type: 'string',
-              description: 'Default transform UUID for this project',
-            },
             visibility: {
               type: 'string',
               enum: ['public', 'private'],
@@ -122,14 +117,11 @@ export function createProjectTools(): ToolDefinition[] {
           throw new Error('No agent configured. Run wisdom_generate_keypair first.');
         }
 
-        const uuid = uuidv4();
         const projectData: CreateProjectRequest = {
-          uuid,
           name: args.name as string,
           description: (args.description as string) || '',
-          owner: agentUuid,
-          default_tags: (args.default_tags as string[]) || [],
-          default_transform: (args.default_transform as string) || null,
+          agent_uuid: agentUuid,
+          tags: (args.default_tags as string[]) || [],
           visibility: (args.visibility as ProjectVisibility) || 'public',
         };
 
@@ -138,16 +130,15 @@ export function createProjectTools(): ToolDefinition[] {
         // Set as current if requested (default: true)
         const setAsCurrent = args.set_as_current !== false;
         if (setAsCurrent) {
-          context.updateConfig({ current_project: project.uuid }, true);
+          context.updateConfig({ current_project: project.id }, true);
         }
 
         return {
-          uuid: project.uuid,
+          id: project.id,
           name: project.name,
           description: project.description,
-          owner: project.owner,
+          agent_uuid: project.agent_uuid,
           visibility: project.visibility,
-          created_at: project.created_at,
           is_current: setAsCurrent,
         };
       },
@@ -190,11 +181,11 @@ export function createProjectTools(): ToolDefinition[] {
 
         return {
           projects: items.map((p) => ({
-            uuid: p.uuid,
+            id: p.id,
             name: p.name,
             description: p.description,
-            is_current: p.uuid === currentProject,
-            created_at: p.created_at,
+            visibility: p.visibility,
+            is_current: p.id === currentProject,
           })),
           count: items.length,
           next_cursor: result.next_cursor,
@@ -227,10 +218,6 @@ export function createProjectTools(): ToolDefinition[] {
               items: { type: 'string' },
               description: 'New default tags',
             },
-            default_transform: {
-              type: 'string',
-              description: 'New default transform',
-            },
             visibility: {
               type: 'string',
               enum: ['public', 'private'],
@@ -250,21 +237,17 @@ export function createProjectTools(): ToolDefinition[] {
         const updates: Partial<CreateProjectRequest> = {};
         if (args.name) updates.name = args.name as string;
         if (args.description !== undefined) updates.description = args.description as string;
-        if (args.default_tags) updates.default_tags = args.default_tags as string[];
-        if (args.default_transform !== undefined)
-          updates.default_transform = args.default_transform as string | null;
+        if (args.default_tags) updates.tags = args.default_tags as string[];
         if (args.visibility) updates.visibility = args.visibility as ProjectVisibility;
 
         const project = await context.gateway.updateProject(uuid, updates);
 
         return {
-          uuid: project.uuid,
+          id: project.id,
           name: project.name,
           description: project.description,
           visibility: project.visibility,
-          default_tags: project.default_tags,
-          default_transform: project.default_transform,
-          updated_at: project.updated_at,
+          tags: project.tags,
         };
       },
     },

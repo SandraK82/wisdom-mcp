@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signTransform, signFragment } from '../crypto/signing.js';
 import type { CreateTransformRequest, CreateFragmentRequest } from '../gateway/types.js';
-import { createLocalAddress, createHubAddress } from '../gateway/types.js';
 
 export function createTransformTools(): ToolDefinition[] {
   return [
@@ -209,10 +208,12 @@ Return your result as JSON:
         const sourceTransform = args.source_transform as string | undefined;
         const projectUUID = (args.project as string) || context.config.config.current_project;
 
-        // Creator is always hub-based
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
+        if (!sourceTransform) {
+          throw new Error('source_transform is required. Every fragment must reference a transform.');
+        }
+
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
+        const transformAddr = context.addressCache.get(sourceTransform, 'TRANSFORMATION', hubHost);
 
         const results = [];
 
@@ -224,7 +225,7 @@ Return your result as JSON:
             creator: creatorAddr,
             when: new Date().toISOString(),
             tags: [],
-            transform: sourceTransform ? createLocalAddress('TRANSFORMATION', sourceTransform) : undefined,
+            transform: transformAddr,
             confidence: 0.8,
             evidence_type: 'unknown',
           };
@@ -357,12 +358,9 @@ Return your result as JSON:
         }
 
         const uuid = uuidv4();
-        // Agent/creator is always hub-based
-        const agentAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
+        const agentAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
         const tagAddresses = ((args.tags as string[]) || []).map((t) =>
-          createLocalAddress('TAG', t)
+          context.addressCache.get(t, 'TAG', hubHost)
         );
         const transformData: Omit<CreateTransformRequest, 'signature'> = {
           uuid,
@@ -388,7 +386,6 @@ Return your result as JSON:
           description: transform.description,
           transform_to: transform.transform_to,
           transform_from: transform.transform_from,
-          created_at: transform.created_at,
         };
       },
     },

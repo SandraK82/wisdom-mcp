@@ -16,16 +16,28 @@ import type {
 } from '../gateway/types.js';
 
 /**
- * Create a canonical JSON string for signing
- * Sorts keys to ensure deterministic output
+ * Create a canonical JSON string for signing.
+ * Recursively sorts all object keys alphabetically for deterministic output.
  */
 function canonicalize(obj: Record<string, unknown>): string {
-  const sortedKeys = Object.keys(obj).sort();
-  const sorted: Record<string, unknown> = {};
-  for (const key of sortedKeys) {
-    sorted[key] = obj[key];
+  return JSON.stringify(sortDeep(obj));
+}
+
+/**
+ * Recursively sort object keys alphabetically.
+ */
+function sortDeep(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(sortDeep);
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj).sort()) {
+      sorted[key] = sortDeep(obj[key]);
+    }
+    return sorted;
   }
-  return JSON.stringify(sorted);
+  return value;
 }
 
 /**
@@ -71,8 +83,8 @@ export function getAgentSignablePayload(agent: Omit<CreateAgentRequest, 'signatu
     uuid: agent.uuid,
     public_key: agent.public_key,
     description: agent.description,
-    trust: agent.trust || { direct: {}, default_trust: 0 },
-    primary_hub: agent.primary_hub || null,
+    trust: agent.trust || { num_trusts: 0, trusts: [] },
+    primary_hub: agent.primary_hub || '',
   });
 }
 

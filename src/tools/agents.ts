@@ -33,10 +33,8 @@ export function createAgentTools(): ToolDefinition[] {
           uuid: agent.uuid,
           public_key: agent.public_key,
           description: agent.description,
-          reputation_score: agent.reputation_score,
           trust: agent.trust,
           primary_hub: agent.primary_hub,
-          created_at: agent.created_at,
           is_current: uuid === context.config.config.agent_uuid,
         };
       },
@@ -74,9 +72,8 @@ export function createAgentTools(): ToolDefinition[] {
           agents: items.map((a) => ({
             uuid: a.uuid,
             description: a.description,
-            reputation_score: a.reputation_score,
+            trust: a.trust,
             is_current: a.uuid === currentAgent,
-            created_at: a.created_at,
           })),
           count: items.length,
           next_cursor: result.next_cursor,
@@ -200,7 +197,6 @@ export function createAgentTools(): ToolDefinition[] {
           fragment: vote.target,
           vote_type: vote.vote_type,
           comment: vote.comment,
-          created_at: vote.created_at,
           message: `Vote cast: ${vote.vote_type}`,
         };
       },
@@ -232,7 +228,6 @@ export function createAgentTools(): ToolDefinition[] {
             voter: v.voter,
             vote_type: v.vote_type,
             comment: v.comment,
-            created_at: v.created_at,
           })),
           summary: {
             total: votes.length,
@@ -293,9 +288,8 @@ export function createAgentTools(): ToolDefinition[] {
               entity: args.entity,
               entity_type: 'agent',
               perspective: perspective,
-              reputation_score: agent.reputation_score,
-              effective_trust: agent.reputation_score - 0.5, // Convert 0-1 to -0.5 to 0.5 range
-              note: 'Trust-path calculation not yet implemented. Using reputation score.',
+              trust: agent.trust,
+              note: 'Trust-path calculation not yet implemented.',
             };
           } catch {
             throw new Error(`Entity not found: ${args.entity}`);

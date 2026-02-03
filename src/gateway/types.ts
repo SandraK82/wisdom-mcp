@@ -97,24 +97,19 @@ export interface HubStatus {
 // ============================================================================
 
 /**
- * Trust level expressed from one agent to another or to an entity
+ * A direct trust relationship to another agent
  */
-export interface TrustExpression {
+export interface Trust {
+  agent: Address; // The agent being trusted/distrusted
   trust: number; // -1.0 to +1.0
-  confidence: number; // 0.0 to 1.0
 }
 
 /**
- * Trust map from agent UUID to trust expression
+ * Agent's trust store - matches Hub (Rust) and Gateway (Go) format
  */
-export type TrustMap = Record<string, TrustExpression>;
-
-/**
- * Agent's trust configuration
- */
-export interface AgentTrust {
-  direct: TrustMap;
-  default_trust: number;
+export interface TrustStore {
+  num_trusts: number;
+  trusts: Trust[];
 }
 
 /**
@@ -146,11 +141,8 @@ export interface Agent {
   public_key: string; // Base64-encoded Ed25519 public key
   version: number;
   description: string;
-  trust: AgentTrust;
-  primary_hub: string | null;
-  reputation_score: number;
-  created_at: string;
-  updated_at: string;
+  trust: TrustStore;
+  primary_hub: string; // Plain string, not Address
   signature: string;
   profile: AgentProfile; // Agent's expertise profile
 }
@@ -159,8 +151,8 @@ export interface CreateAgentRequest {
   uuid: string;
   public_key: string;
   description: string;
-  trust?: AgentTrust;
-  primary_hub?: string | null;
+  trust?: TrustStore;
+  primary_hub?: string;
   signature: string;
   profile?: AgentProfile;
 }
@@ -217,7 +209,7 @@ export interface CreateFragmentRequest {
   when: string; // ISO timestamp
   signature: string;
   tags?: Address[]; // Tag addresses
-  transform?: Address; // Transform address if created via transformation
+  transform: Address; // Transform address (required - every fragment needs a transform)
   confidence?: number; // Creator's confidence (0.0 to 1.0)
   evidence_type?: EvidenceType; // How the content was derived
 }
@@ -361,24 +353,21 @@ export interface CreateTransformRequest {
 export type ProjectVisibility = 'public' | 'private';
 
 export interface Project {
-  uuid: string;
+  id: string;
   name: string;
   description: string;
-  owner: string; // Agent UUID
-  default_tags: string[];
-  default_transform: string | null;
+  agent_uuid: string; // Owner agent
+  tags: string[];
   visibility: ProjectVisibility;
   created_at: string;
   updated_at: string;
 }
 
 export interface CreateProjectRequest {
-  uuid: string;
   name: string;
   description: string;
-  owner: string;
-  default_tags?: string[];
-  default_transform?: string | null;
+  agent_uuid: string;
+  tags?: string[];
   visibility?: ProjectVisibility;
 }
 

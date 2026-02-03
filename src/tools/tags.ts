@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signTag, signRelation } from '../crypto/signing.js';
 import type { CreateTagRequest, CreateRelationRequest, TagCategory } from '../gateway/types.js';
-import { createLocalAddress, createHubAddress } from '../gateway/types.js';
 
 export function createTagTools(): ToolDefinition[] {
   return [
@@ -52,10 +51,7 @@ export function createTagTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
-        // Tags are infrastructure - creator is always hub-based
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
         const tagData: Omit<CreateTagRequest, 'signature'> = {
           uuid,
           name: args.name as string,
@@ -75,7 +71,6 @@ export function createTagTools(): ToolDefinition[] {
           name: tag.name,
           category: tag.category,
           content: tag.content,
-          created_at: tag.created_at,
         };
       },
     },
@@ -200,12 +195,9 @@ export function createTagTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
-        // Creator is always hub-based
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
-        const fragmentAddr = createLocalAddress('FRAGMENT', args.fragment as string);
-        const tagAddr = createLocalAddress('TAG', tagUuid);
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
+        const fragmentAddr = context.addressCache.get(args.fragment as string, 'FRAGMENT', hubHost);
+        const tagAddr = context.addressCache.get(tagUuid, 'TAG', hubHost);
         const now = new Date().toISOString();
 
         const relationData: Omit<CreateRelationRequest, 'signature'> = {

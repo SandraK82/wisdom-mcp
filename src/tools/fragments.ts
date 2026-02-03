@@ -1,8 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signFragment } from '../crypto/signing.js';
-import type { CreateFragmentRequest, SearchFragmentsRequest } from '../gateway/types.js';
-import { createLocalAddress, createHubAddress, addressToString } from '../gateway/types.js';
+import type { CreateFragmentRequest, SearchFragmentsRequest, Fragment } from '../gateway/types.js';
+import { addressToString } from '../gateway/types.js';
+
+/** Cache fragment address from gateway response */
+function cacheFragment(f: Fragment, context: { addressCache: { put: (uuid: string, addr: any) => void } }): void {
+  if (f.uuid && f.creator) {
+    // Cache the fragment itself with FRAGMENT domain
+    context.addressCache.put(f.uuid, { server_port: f.creator.server_port, domain: 'FRAGMENT', entity: f.uuid });
+  }
+}
 
 export function createFragmentTools(): ToolDefinition[] {
   return [
@@ -42,10 +50,12 @@ export function createFragmentTools(): ToolDefinition[] {
         const sourceTransform = args.source_transform as string | undefined;
         const projectUUID = (args.project as string) || context.config.config.current_project;
 
-        // Creator is always hub-based (agent lives on hub)
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
+        if (!sourceTransform) {
+          throw new Error('source_transform is required. Every fragment must reference a transform that produced it. Create a transform first with wisdom_create_transform.');
+        }
+
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
+        const transformAddr = context.addressCache.get(sourceTransform, 'TRANSFORMATION', hubHost);
 
         const fragmentData: Omit<CreateFragmentRequest, 'signature'> = {
           uuid,
@@ -53,7 +63,7 @@ export function createFragmentTools(): ToolDefinition[] {
           creator: creatorAddr,
           when: new Date().toISOString(),
           tags: [],
-          transform: sourceTransform ? createLocalAddress('TRANSFORMATION', sourceTransform) : undefined,
+          transform: transformAddr,
           confidence: 0.8,
           evidence_type: 'unknown',
         };
@@ -63,6 +73,9 @@ export function createFragmentTools(): ToolDefinition[] {
           ...fragmentData,
           signature,
         }, projectUUID);
+
+        // Cache the returned address
+        cacheFragment(fragment, context);
 
         return {
           uuid: fragment.uuid,
@@ -91,6 +104,7 @@ export function createFragmentTools(): ToolDefinition[] {
       },
       handler: async (args, context) => {
         const fragment = await context.gateway.getFragment(args.uuid as string);
+        cacheFragment(fragment, context);
         return fragment;
       },
     },
@@ -144,6 +158,7 @@ export function createFragmentTools(): ToolDefinition[] {
 
         const result = await context.gateway.searchFragments(params);
         const items = result.items || [];
+        items.forEach((f) => cacheFragment(f, context));
         return {
           fragments: items.map((f) => ({
             uuid: f.uuid,
@@ -194,13 +209,14 @@ export function createFragmentTools(): ToolDefinition[] {
         }
 
         const items = result.items || [];
+        items.forEach((f) => cacheFragment(f, context));
         return {
           fragments: items.map((f) => ({
             uuid: f.uuid,
             content: f.content.substring(0, 100) + (f.content.length > 100 ? '...' : ''),
             creator: addressToString(f.creator),
             state: f.state,
-            created_at: f.created_at,
+            when: f.when,
           })),
           count: items.length,
           next_cursor: result.next_cursor,

@@ -8,6 +8,8 @@ import {
 import { loadConfig, LoadedConfig } from './config/index.js';
 import { GatewayClient } from './gateway/client.js';
 import { KeyManager } from './crypto/keys.js';
+import type { Address, AddressDomain } from './gateway/types.js';
+import { createLocalAddress, createHubAddress } from './gateway/types.js';
 
 // Tool imports
 import { createFragmentTools } from './tools/fragments.js';
@@ -20,12 +22,70 @@ import { createUtilityTools } from './tools/utility.js';
 import { createValidityTools } from './tools/validity.js';
 
 /**
+ * LRU address cache for entities seen during this session.
+ * Caches gateway-returned addresses so relations use correct hub addresses.
+ * Evicts least-recently-used entries when capacity is reached.
+ */
+export class AddressCache {
+  private cache = new Map<string, Address>();
+  private maxSize: number;
+
+  constructor(maxSize = 5000) {
+    this.maxSize = maxSize;
+  }
+
+  /** Cache an address by entity UUID */
+  put(uuid: string, addr: Address): void {
+    // Delete first to refresh insertion order (Map preserves insertion order)
+    if (this.cache.has(uuid)) {
+      this.cache.delete(uuid);
+    }
+    this.cache.set(uuid, addr);
+    // Evict oldest entries if over capacity
+    if (this.cache.size > this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+  }
+
+  /** Get cached address, or build one using hubHost fallback */
+  get(uuid: string, domain: AddressDomain, hubHost?: string): Address {
+    const cached = this.cache.get(uuid);
+    if (cached) {
+      // Move to end (most recently used)
+      this.cache.delete(uuid);
+      this.cache.set(uuid, cached);
+      return cached;
+    }
+    return hubHost
+      ? createHubAddress(hubHost, domain, uuid)
+      : createLocalAddress(domain, uuid);
+  }
+
+  /** Check if a UUID is cached */
+  has(uuid: string): boolean {
+    return this.cache.has(uuid);
+  }
+
+  /** Number of cached entries */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  /** Clear the cache */
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+/**
  * Server context shared across tools
  */
 export interface ServerContext {
   config: LoadedConfig;
   gateway: GatewayClient;
   keyManager: KeyManager;
+  addressCache: AddressCache;
 
   // Reload config from disk
   reloadConfig(): void;
@@ -62,10 +122,12 @@ export async function createServer(): Promise<Server> {
   const keyManager = new KeyManager(loadedConfig.config);
 
   // Create server context
+  const addressCache = new AddressCache();
   const context: ServerContext = {
     config: loadedConfig,
     gateway,
     keyManager,
+    addressCache,
 
     reloadConfig() {
       loadedConfig = loadConfig();

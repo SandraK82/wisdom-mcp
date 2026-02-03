@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ToolDefinition } from '../server.js';
 import { signRelation } from '../crypto/signing.js';
 import type { CreateRelationRequest, RelationType } from '../gateway/types.js';
-import { createLocalAddress, createHubAddress, addressToString } from '../gateway/types.js';
+import { addressToString } from '../gateway/types.js';
 
 export function createRelationTools(): ToolDefinition[] {
   return [
@@ -56,12 +56,9 @@ export function createRelationTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
-        // Creator is always hub-based
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
-        const fromAddr = createLocalAddress('FRAGMENT', args.source as string);
-        const toAddr = createLocalAddress('FRAGMENT', args.target as string);
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
+        const fromAddr = context.addressCache.get(args.source as string, 'FRAGMENT', hubHost);
+        const toAddr = context.addressCache.get(args.target as string, 'FRAGMENT', hubHost);
         const now = new Date().toISOString();
 
         const relationData: Omit<CreateRelationRequest, 'signature'> = {
@@ -88,7 +85,7 @@ export function createRelationTools(): ToolDefinition[] {
           to: addressToString(relation.to),
           type: relation.type,
           content: relation.content,
-          created_at: relation.created_at,
+          when: relation.when,
         };
       },
     },
@@ -194,12 +191,9 @@ export function createRelationTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
-        // Creator is always hub-based
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
-        const fragmentAddr = createLocalAddress('FRAGMENT', args.fragment as string);
-        const tagAddr = createLocalAddress('TAG', typeTag.uuid);
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
+        const fragmentAddr = context.addressCache.get(args.fragment as string, 'FRAGMENT', hubHost);
+        const tagAddr = context.addressCache.get(typeTag.uuid, 'TAG', hubHost);
         const now = new Date().toISOString();
 
         // Create RELATED_TO relation from fragment to TYPE tag
@@ -261,12 +255,9 @@ export function createRelationTools(): ToolDefinition[] {
         }
 
         const uuid = uuidv4();
-        // Creator is always hub-based
-        const creatorAddr = hubHost
-          ? createHubAddress(hubHost, 'AGENT', agentUuid)
-          : createLocalAddress('AGENT', agentUuid);
-        const answerAddr = createLocalAddress('FRAGMENT', args.answer as string);
-        const questionAddr = createLocalAddress('FRAGMENT', args.question as string);
+        const creatorAddr = context.addressCache.get(agentUuid, 'AGENT', hubHost);
+        const answerAddr = context.addressCache.get(args.answer as string, 'FRAGMENT', hubHost);
+        const questionAddr = context.addressCache.get(args.question as string, 'FRAGMENT', hubHost);
         const now = new Date().toISOString();
 
         const relationData: Omit<CreateRelationRequest, 'signature'> = {
